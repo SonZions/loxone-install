@@ -1,19 +1,18 @@
 $ErrorActionPreference = "Stop"
-Write-Host "Hole aktuelle Loxone Config Version..."
 
-# Lade XML mit den Versionen
-$updateXml = Invoke-WebRequest -Uri "https://update.loxone.com/versions/update.xml" -UseBasicParsing
-[xml]$xml = $updateXml.Content
+$version = "15050304"
+$zipUrl = "https://updatefiles.loxone.com/LoxConfig/LoxoneConfigSetup_$version.zip"
+$zipPath = "C:\LoxoneConfig.zip"
+$extractPath = "C:\LoxoneInstall"
 
-# Hole aktuellste Version von Loxone Config
-$latestConfig = $xml.SelectSingleNode("//Version[starts-with(Product, 'LoxoneConfig')][1]")
-$version = $latestConfig.Number
-$downloadUrl = "https://update.loxone.com/pub/software/LoxoneConfig/$version/LoxoneConfig.exe"
+Write-Host "Lade Loxone Config v$version von $zipUrl ..."
+Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
 
-Write-Host "Lade LoxoneConfig $version herunter..."
-Invoke-WebRequest -Uri $downloadUrl -OutFile "C:\LoxoneConfig.exe"
+Write-Host "Entpacke ZIP nach $extractPath ..."
+Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
-Write-Host "Installiere Loxone Config $version..."
-Start-Process "C:\LoxoneConfig.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
+$installer = Join-Path $extractPath "LoxoneConfigSetup.exe"
+Write-Host "Starte Silent-Installation von $installer ..."
+Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
 
 Write-Host "✅ Loxone Config $version installiert."
