@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$version = "15050304"
+$version = "16011106"
 $zipUrl = "https://updatefiles.loxone.com/LoxConfig/LoxoneConfigSetup_$version.zip"
 $zipPath = "C:\LoxoneConfig.zip"
 $extractPath = "C:\LoxoneInstall"
