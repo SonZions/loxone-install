@@ -1,11 +1,16 @@
 $ErrorActionPreference = "Stop"
 
-$version = "16011106"
-$zipUrl = "https://updatefiles.loxone.com/LoxConfig/LoxoneConfigSetup_$version.zip"
+Write-Host "Ermittle aktuelle Loxone Config Version ..."
+$updateXml = Invoke-WebRequest -Uri "https://update.loxone.com/updatecheck.xml" -UseBasicParsing
+[xml]$xml = $updateXml.Content
+
+$version = $xml.Miniserversoftware.Release.Version
+$zipUrl  = $xml.Miniserversoftware.Release.Path
 $zipPath = "C:\LoxoneConfig.zip"
 $extractPath = "C:\LoxoneInstall"
 
-Write-Host "Lade Loxone Config v$version von $zipUrl ..."
+Write-Host "Neueste Version: $version"
+Write-Host "Lade von $zipUrl ..."
 Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath
 
 Write-Host "Entpacke ZIP nach $extractPath ..."
@@ -15,4 +20,4 @@ $installer = Join-Path $extractPath "LoxoneConfigSetup.exe"
 Write-Host "Starte Silent-Installation von $installer ..."
 Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" -Wait
 
-Write-Host "✅ Loxone Config $version installiert."
+Write-Host "Loxone Config $version erfolgreich installiert."
