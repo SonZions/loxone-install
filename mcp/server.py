@@ -9,6 +9,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.responses import JSONResponse
 from auth import OAuth, Guard
 from core import Service, Miniserver, Fault, now
+from controls import controls, mappings
 
 READ=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 WRITE=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
@@ -52,7 +53,7 @@ def create_app(config, backend=None):
         identity(ctx)
         async def action():
             s=await service.backend.structure()
-            ds=[service.describe(s,u,d) for u,d in s['controls'].items() if room_uuid is None or d.get('room')==room_uuid]
+            ds=[service.describe(s,u,d) for u,d in controls(s).items() if room_uuid is None or d.get('room')==room_uuid]
             return {'devices':ds[max(0,offset):max(0,offset)+max(1,min(limit,100))], 'total':len(ds),'error':None}
         return await run(action)
 
@@ -73,7 +74,7 @@ def create_app(config, backend=None):
 
     @mcp.tool(annotations=READ)
     async def loxone_get_parameters(uuid:str,ctx:Context)->dict:
-        """Read documented runtime ventilation parameters; these are not arbitrary Config parameters."""
+        """Read mapped runtime parameters for ventilation, light subcontrols and room comfort temperatures. List devices to find exact subcontrol UUIDs; no arbitrary Config parameters."""
         identity(ctx)
         return await run(lambda:service.parameters(uuid))
 
@@ -90,7 +91,7 @@ def create_app(config, backend=None):
 
     @mcp.tool(annotations=WRITE)
     async def loxone_set_parameter(uuid:str,parameter:str,value:float,expected_value:float,request_id:str,ctx:Context)->dict:
-        """Set an explicitly allowlisted runtime ventilation parameter, then verify it live.
+        """Set an explicitly allowlisted runtime parameter, then verify it live. Light child UUIDs include /AIx or /masterValue; discover with list_devices/get_parameters.
         Requires write scope, expected current value, and unique request ID (16-100 safe characters).
         ALWAYS ask the user to confirm this exact device, parameter, old value and target value
         immediately before this call. General permission to write is not confirmation of a change.
@@ -101,14 +102,16 @@ def create_app(config, backend=None):
 
     @mcp.tool(annotations=WRITE)
     async def loxone_execute_command(uuid:str,parameter:str,command:str,value:float,expected_value:float,request_id:str,ctx:Context)->dict:
-        """Execute only a mapped ventilation command, with explicit device and parameter. No API paths.
+        """Execute only a mapped runtime command from get_parameters, with explicit device and parameter. No API paths.
         ALWAYS ask the user to confirm this exact device, parameter, old value and target value
         immediately before calling. General permission to write is not confirmation of a change."""
         actor=identity(ctx,True)
-        from core import PARAMETERS
-        if parameter not in PARAMETERS or command!=PARAMETERS[parameter][0]:
-            return {'error':'unsupported_command','timestamp':now()}
-        return await run(lambda:service.write(uuid,parameter,value,expected_value,request_id,actor))
+        async def action():
+            _, device = await service.device(uuid)
+            if command != mappings(device).get(parameter, {}).get('command'):
+                return {'error':'unsupported_command','timestamp':now()}
+            return await service.write(uuid,parameter,value,expected_value,request_id,actor)
+        return await run(action)
 
     @mcp.tool(annotations=READ)
     async def loxone_verify_parameter(uuid:str,parameter:str,expected_value:float,ctx:Context)->dict:

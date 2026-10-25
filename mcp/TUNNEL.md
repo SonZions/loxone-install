@@ -13,16 +13,15 @@ with a dedicated runtime key (Tunnels Read + Use, not an admin key).
 
 The sidecar injects a separate random credential **only on the loopback hop** to
 the MCP server. The server checks its hash, expiry, enabled flag and actual local
-peer address. This credential grants **read scope only**. Writes remain rejected
-by both scope and the existing disabled policy. The key never goes to ChatGPT;
+peer address. By default this credential grants **read scope only**. The owner can enable
+write scope with `--allow-writes`; exact device/parameter allowlists still apply. The key never goes to ChatGPT;
 configure **No authentication** for the app-level OAuth choice, since the OpenAI
 tunnel ACL supplies remote authorization and the sidecar supplies local backend
 authentication. This does not make the MCP endpoint anonymous or public.
 
-All users authorized by the tunnel ACL share the server-side read-only service
-identity. This is not a per-user OAuth delegation design. The existing OAuth flow
-remains available separately; the tunnel credential does not grant write scope.
-Future write enablement needs an explicit scoped design and allowlist change.
+All users authorized by the tunnel ACL share the server-side service identity.
+This is not a per-user OAuth delegation design. The existing OAuth flow remains
+available separately. Restrict tunnel membership to the intended owner.
 
 ## Prepared artifacts
 
@@ -113,3 +112,7 @@ allowlist, expected values, replay prevention and audit. General write capabilit
 is not permission for the assistant to perform any specific change.
 
 Source: https://developers.openai.com/api/docs/guides/custom-mcp-server
+
+The owner authorized the ventilation, lighting and room-controller allowlist on
+2026-10-25. See README for the exact supported parameter scope. No blanket access
+to all commands, scenes, schedules or safety settings is granted.

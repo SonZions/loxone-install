@@ -5,3 +5,5 @@
 !server.py
 !tests/
 !tests/*.py
+!controls.py
+!allowlist.py

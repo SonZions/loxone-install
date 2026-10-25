@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 import httpx
+from controls import controls, mappings, logic_connected, parameter_value, wire_command
 from loxwebsocket import LoxWs
 
 logging.getLogger('loxwebsocket').disabled = True
@@ -72,7 +73,8 @@ class Miniserver:
     async def write(self, uuid, command, value):
         # Only the fixed command mapping in Service.write can reach this method.
         async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
-            r = await client.get(f"{self.config['url'].rstrip('/')}/jdev/sps/io/{uuid}/{command}/{value:g}",
+            suffix = command if value is None else f'{command}/{value:g}'
+            r = await client.get(f"{self.config['url'].rstrip('/')}/jdev/sps/io/{uuid}/{suffix}",
                                  auth=(self.config['username'], self.config['password']))
             r.raise_for_status()
             if str(r.json().get('LL', {}).get('Code')) != '200':
@@ -94,10 +96,10 @@ class Service:
         return json.loads(self.policy_path.read_text())
 
     async def device(self, uuid):
-        if not UUID.fullmatch(uuid):
+        if not UUID.fullmatch(uuid.split('/')[0]) or (len(uuid.split('/')) > 1 and not re.fullmatch(r'(masterValue|masterColor|AI[0-9]+)', uuid.split('/',1)[1])):
             raise Fault('invalid_device_uuid')
         s = await self.backend.structure()
-        d = s['controls'].get(uuid)
+        d = controls(s).get(uuid)
         if not d or d.get('uuidAction') != uuid:
             raise Fault('unknown_device')
         return s, d
@@ -109,23 +111,29 @@ class Service:
     async def states(self, uuid, parameter=None):
         s, d = await self.device(uuid)
         ids = d.get('states', {})
+        spec = mappings(d).get(parameter, {})
         if parameter is not None:
+            state = spec.get('state', parameter)
+            if state in ids:
+                ids = {parameter: ids[state]}
             if parameter not in ids:
                 raise Fault('unknown_parameter')
             ids = {parameter: ids[parameter]}
         values = await self.backend.snapshot(ids.values()) if ids else {}
-        return {**self.describe(s, uuid, d), 'states': {k: {'uuid': v, **values[v]} for k, v in ids.items()}}
+        return {**self.describe(s, uuid, d), 'states': {k: {'uuid': v, **values[v], 'value':parameter_value(k,values[v]['value']), 'raw_value':values[v]['value']} for k, v in ids.items()}}
 
     async def parameters(self, uuid):
         s, d = await self.device(uuid)
-        names = {k:v for k,v in d.get('states', {}).items() if k in PARAMETERS}
-        values = await self.backend.snapshot(names.values()) if names else {}
+        specs = mappings(d)
+        ids = {k:spec['state'] for k,spec in specs.items()}
+        values = await self.backend.snapshot([d['states'][v] for v in ids.values()]) if ids else {}
         policy = self.policy()
         return {**self.describe(s, uuid, d), 'parameters': {
-            k: {**values[v], 'state_uuid':v, 'unit':'%', 'min':0, 'max':100,
-                'logic_connected':bool(d.get('details', {}).get(PARAMETERS[k][1])),
-                'write_allowed':bool(policy.get('writes_enabled') and k in policy.get('allowlist', {}).get(uuid, []))}
-            for k,v in names.items()}, 'limitation':'Only documented runtime ventilation parameters; no configuration-program upload.'}
+            k: {**values[d['states'][v]], 'value':parameter_value(k,values[d['states'][v]]['value']),
+                'state_uuid':d['states'][v], 'unit':specs[k]['unit'], 'min':specs[k]['min'], 'max':specs[k]['max'],
+                'command':specs[k]['command'], 'logic_connected':logic_connected(d,specs[k]),
+                'write_allowed':bool(policy.get('writes_enabled') and k in policy.get('allowlist', {}).get(uuid, []) and not logic_connected(d,specs[k]))}
+            for k,v in ids.items()}, 'limitation':'Runtime ventilation, light brightness/switches and room comfort temperatures only; no configuration upload.'}
 
     def history(self, limit=20):
         return [dict(r) for r in self.db.execute('SELECT * FROM audit ORDER BY id DESC LIMIT ?', (min(max(limit,1),100),))]
@@ -144,15 +152,46 @@ class Service:
                 if not p.get('writes_enabled') or parameter not in p.get('allowlist', {}).get(uuid, []):
                     raise Fault('write_not_allowlisted')
                 s, d = await self.device(uuid)
-                if d.get('type') != 'Ventilation' or parameter not in PARAMETERS:
+                spec = mappings(d).get(parameter)
+                if not spec:
                     raise Fault('unsupported_parameter')
                 if d.get('isSecured') or d.get('restrictions', 0):
                     raise Fault('restricted_device')
-                cmd, flag = PARAMETERS[parameter]
-                if d.get('details', {}).get(flag):
+                if not spec['min'] <= value <= spec['max'] or (spec.get('integer') and value != int(value)):
+                    raise Fault('value_out_of_range')
+                if logic_connected(d, spec):
                     raise Fault('parameter_controlled_by_logic')
+                if d.get('type') == 'IRoomControllerV2':
+                    if 'F' in d.get('details', {}).get('format', ''):
+                        raise Fault('unsupported_temperature_unit')
+                    other = 'comfortTemperatureCool' if parameter == 'comfortTemperature' else 'comfortTemperature'
+                    if not d.get('details', {}).get('singleComfortTemperature') and other in d.get('states', {}):
+                        other_value = (await self.states(uuid, other))['states'][other]['value']
+                        if (parameter == 'comfortTemperature' and value > other_value) or (parameter == 'comfortTemperatureCool' and value < other_value):
+                            raise Fault('inconsistent_heating_cooling')
+                if d.get('type') == 'ColorPickerV2' and 'sequenceColorIdx' in d.get('states', {}):
+                    sequence = await self.states(uuid, 'sequenceColorIdx')
+                    if sequence['states']['sequenceColorIdx']['value'] != -1:
+                        raise Fault('active_color_sequence')
                 current = await self.states(uuid, parameter)
                 old = current['states'][parameter]['value']
+                cmd, wire_value = wire_command(spec, value, current['states'][parameter].get('raw_value'))
+                parent = d.get('_parent_control', {})
+                if parent.get('isSecured') or parent.get('restrictions', 0):
+                    raise Fault('restricted_device')
+                if 'jLocked' in parent.get('states', {}):
+                    parent_lock = await self.backend.snapshot([parent['states']['jLocked']])
+                    if parent_lock[parent['states']['jLocked']]['value']:
+                        raise Fault('control_locked')
+                if 'lockedOn' in d.get('states', {}) and value == 0:
+                    locked_on = await self.states(uuid, 'lockedOn')
+                    if locked_on['states']['lockedOn']['value']:
+                        raise Fault('control_locked')
+                if d.get('type') == 'Dimmer':
+                    bound_ids = {k:v for k,v in d.get('states', {}).items() if k in ('min','max')}
+                    limits = await self.backend.snapshot(bound_ids.values()) if bound_ids else {}
+                    if value != 0 and any(value < limits[v]['value'] if k=='min' else value > limits[v]['value'] for k,v in bound_ids.items()):
+                        raise Fault('value_out_of_range')
                 counterpart = parameter[:-3] + ('Max' if parameter.endswith('Min') else 'Min')
                 if counterpart in d.get('states', {}):
                     bounds = await self.states(uuid, counterpart)
@@ -178,7 +217,7 @@ class Service:
             self.record(actor,request_id,uuid,parameter,old,value,'pending')
             verified = None
             try:
-                await self.backend.write(uuid, cmd, value)
+                await self.backend.write(uuid, cmd, wire_value)
                 current = await self.states(uuid, parameter)
                 verified = current['states'][parameter]['value']
                 result = 'verified' if verified == value else 'verification_failed'

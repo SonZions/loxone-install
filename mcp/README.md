@@ -207,3 +207,34 @@ collector. It does not execute third-party installation scripts. The existing
 Loxone command reference:
 https://www.loxone.com/wp-content/uploads/datasheets/StructureFile.pdf
 (`Ventilation`, `setPresenceMin/{value}` and related runtime commands).
+
+
+## Expanded owner-authorized allowlist (2026-10-25)
+
+The owner authorized all ventilation controls, lighting and room controllers,
+with a fresh human confirmation before each concrete change. Exact runtime
+mappings now cover:
+
+- Ventilation: presenceMin/Max and absenceMin/Max (0–100%, min/max consistency).
+- LightControllerV2 children: Switch active (0/1), Dimmer position (0–100%),
+  ColorPickerV2 brightness (0–100%, preserving current hue/temperature).
+- IRoomControllerV2: comfortTemperature and comfortTemperatureCool (10–30 in
+  the configured temperature unit; Fahrenheit configurations rejected).
+
+List devices now includes light children with their exact `/AIx` or `/masterValue`
+identifiers. Use get_parameters for supported names, commands and limits.
+Secured/restricted controls, logic-connected temperatures, parent locks and active
+color sequences remain protected. The central lighting aggregate is not exposed
+as one blanket write: control its individually allowlisted circuits instead.
+This does not authorize editing scenes, color sequences, schedules, safety
+settings, arbitrary house switches, or configuration uploads.
+
+`allowlist.py` reads the live structure and emits a proposed explicit policy;
+it never operates actuators. Review and save its `policy` object server-side.
+New devices are not automatically authorized. Policy changes must preserve an
+owner approval record and a backup. Human confirmation remains a ChatGPT-side
+requirement; the server cannot prove a human approved a received call.
+
+Mapping source: official Loxone Structure File v17, pages 54–60, 72–78 and 132:
+https://www.loxone.com/enen/wp-content/uploads/sites/3/2026/04/1700_Structure-File.pdf
+Tests use mocks only for writes. Production acceptance reads the new parameters.
