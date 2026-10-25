@@ -39,8 +39,8 @@ def test_discovery_and_live_mock_reads(app):
         token=app.oauth.put('access',{'sub':'owner','scopes':['loxone:read'],'resource':app.oauth.resource},60)
         r=rpc(c,'tools/list',token=token)
         assert r.status_code==200
-        tools=r.json()['result']['tools'];assert len(tools)==10
-        assert all(t['annotations']['readOnlyHint']==(t['name'] not in ['loxone_set_parameter','loxone_execute_command']) for t in tools)
+        tools=r.json()['result']['tools'];assert len(tools)==12
+        assert all(t['annotations']['readOnlyHint']==(t['name'] not in ['loxone_set_parameter','loxone_execute_command','loxone_execute_group']) for t in tools)
         for name,args in [('loxone_get_system_info',{}),('loxone_get_device',{'uuid':U}),('loxone_get_parameters',{'uuid':U}),('loxone_verify_parameter',{'uuid':U,'parameter':'presenceMin','expected_value':11})]:
             r=rpc(c,'tools/call',{'name':name,'arguments':args},token)
             assert not r.json()['result'].get('isError'),r.text

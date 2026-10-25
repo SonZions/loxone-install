@@ -238,3 +238,32 @@ requirement; the server cannot prove a human approved a received call.
 Mapping source: official Loxone Structure File v17, pages 54–60, 72–78 and 132:
 https://www.loxone.com/enen/wp-content/uploads/sites/3/2026/04/1700_Structure-File.pdf
 Tests use mocks only for writes. Production acceptance reads the new parameters.
+
+
+## Blinds and native central groups (owner authorized 2026-10-25)
+
+Individual Jalousie parameters: targetPosition and targetPositionLamelle (0–100%,
+0=open/horizontal, 100=closed/vertical), autoAllowed (0/1). Stop is available via
+loxone_execute_group even for a single Jalousie. Safety, lock, offline and end-position
+adjustment states block commands; no calibration or protection override is exposed.
+A verified target is only an acknowledged target, not completed physical movement.
+Read position/up/down afterwards to check movement.
+
+loxone_get_group_state returns the members, states, allowed commands and state_token.
+Ask the owner to confirm the exact command and all affected members. Then call
+loxone_execute_group with this token and a unique request ID. CentralJalousie allows
+FullUp, FullDown, stop, auto and NoAuto; CentralLightController allows on and reset
+(native light-off). Only the explicit configured IDs go through selectedcontrols.
+Group membership is pinned in policy; lighting circuit membership is pinned too.
+Membership changes require owner-reviewed policy regeneration. A stale state token
+rejects the action. Each operation persists intent and all before/after member states;
+partial failure/unknown outcomes are reported, never silently retried or rolled back.
+
+The earlier exclusions of Licht Zentral are superseded by this explicit approval.
+The built-in Licht Zentral group has 13 controllers; the Garden controller is not
+part of that Loxone group and is not silently added. Group commands follow the
+Miniserver's group membership, not a guess based on names.
+
+Official mapping: Structure File v17 pages 43–44 and 87–90. Group tooling increases
+MCP discovery from 10 to 12 tools. Refresh the ChatGPT plugin's discovered tools
+if an existing chat does not yet see loxone_get_group_state/loxone_execute_group.

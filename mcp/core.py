@@ -161,6 +161,12 @@ class Service:
                     raise Fault('value_out_of_range')
                 if logic_connected(d, spec):
                     raise Fault('parameter_controlled_by_logic')
+                if d.get('type') == 'Jalousie':
+                    checks={k:v for k,v in d.get('states', {}).items() if k in ('safetyActive','locked','adjustingEndPos','deviceState')}
+                    checks_values=await self.backend.snapshot(checks.values()) if checks else {}
+                    for k,v in checks.items():
+                        if (k=='deviceState' and checks_values[v]['value']==1) or (k!='deviceState' and checks_values[v]['value']):
+                            raise Fault('blind_safety_or_lock_active')
                 if d.get('type') == 'IRoomControllerV2':
                     if 'F' in d.get('details', {}).get('format', ''):
                         raise Fault('unsupported_temperature_unit')
@@ -220,7 +226,7 @@ class Service:
                 await self.backend.write(uuid, cmd, wire_value)
                 current = await self.states(uuid, parameter)
                 verified = current['states'][parameter]['value']
-                result = 'verified' if verified == value else 'verification_failed'
+                result = 'verified' if math.isclose(verified,value,rel_tol=0,abs_tol=1e-6) else 'verification_failed'
             except Exception:
                 result = 'outcome_unknown'
             self.db.execute('UPDATE audit SET result=?, verified_value=? WHERE request_id=?',
@@ -229,7 +235,8 @@ class Service:
             # may have changed the value. Operator must inspect fresh state first.
             return {'uuid':uuid,'parameter':parameter,'old_value':old,'new_value':value,
                     'verified_value':verified,'timestamp':now(),'result':result,
-                    'error':None if result == 'verified' else result,'request_id':request_id}
+                    'error':None if result == 'verified' else result,'request_id':request_id,
+                    'verification_scope':'target_acknowledged_not_physical_completion' if d.get('type')=='Jalousie' and parameter.startswith('target') else 'parameter_state'}
 
     def record(self, actor,rid,uuid,parameter,old,new,result):
         self.db.execute('INSERT INTO audit(timestamp,actor,request_id,uuid,parameter,old_value,new_value,result) VALUES(?,?,?,?,?,?,?,?)',

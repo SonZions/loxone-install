@@ -5,11 +5,16 @@ import json
 from collections import Counter
 from controls import controls, mappings, logic_connected
 from core import Miniserver
+from groups import COMMANDS, members, circuit_members
 
 def build(structure):
-    allowed={}; counts=Counter(); excluded=[]
+    allowed={}; groups={}; counts=Counter(); excluded=[]
     for uuid, device in controls(structure).items():
         specs=mappings(device)
+        if device.get('type') in COMMANDS and not device.get('isSecured') and not device.get('restrictions',0):
+            groups[uuid]={'commands':list(COMMANDS[device['type']]),'members':members(uuid,device)}
+            if device['type']=='CentralLightController':groups[uuid]['circuits']=circuit_members(structure,groups[uuid]['members'])
+            if device['type']!='Jalousie':counts[device['type']]+=1
         if not specs:
             continue
         parent=device.get('_parent_control', {})
@@ -19,7 +24,7 @@ def build(structure):
         if names:
             allowed[uuid]=names;counts[device['type']]+=1
         else:excluded.append({'uuid':uuid,'reason':'logic_connected'})
-    return {'writes_enabled':True,'allowlist':allowed,'pilot_grant':None},dict(counts),excluded
+    return {'writes_enabled':True,'allowlist':allowed,'pilot_grant':None,'groups':groups},dict(counts),excluded
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--config',default='/run/secrets/config.json');args=parser.parse_args()

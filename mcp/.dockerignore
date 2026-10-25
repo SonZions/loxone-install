@@ -7,3 +7,4 @@
 !tests/*.py
 !controls.py
 !allowlist.py
+!groups.py

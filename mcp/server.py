@@ -130,6 +130,26 @@ def create_app(config, backend=None):
         identity(ctx)
         return {'changes':service.history(limit),'timestamp':now(),'error':None}
 
+    @mcp.tool(annotations=READ)
+    async def loxone_get_group_state(uuid:str,ctx:Context)->dict:
+        """Read exact central-group members, current states, allowed commands and a state_token.
+        Supports CentralJalousie, CentralLightController, and individual Jalousie (stop).
+        Read immediately before asking for confirmation; name all affected members."""
+        identity(ctx)
+        from groups import read_group
+        return await run(lambda:read_group(service,uuid))
+
+    @mcp.tool(annotations=WRITE)
+    async def loxone_execute_group(uuid:str,command:str,state_token:str,request_id:str,ctx:Context)->dict:
+        """Execute a pinned central-group command or individual blind stop. No arbitrary paths.
+        ALWAYS ask the user to confirm the exact group, ALL affected members, command and
+        current states immediately before calling. General write permission is not approval.
+        Get a fresh state_token from loxone_get_group_state. Blind target verification does
+        NOT mean physical travel completed; subsequently read position/up/down. Never auto-retry."""
+        actor=identity(ctx,True)
+        from groups import execute_group
+        return await run(lambda:execute_group(service,uuid,command,state_token,request_id,actor))
+
     @mcp.custom_route('/healthz',methods=['GET'])
     async def health(request):
         return JSONResponse({'status':'ok','writes_enabled':bool(service.policy().get('writes_enabled'))})

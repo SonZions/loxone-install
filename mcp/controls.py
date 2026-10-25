@@ -24,6 +24,13 @@ def controls(structure):
 
 def mappings(device):
     typ = device.get('type')
+    if typ == 'Jalousie':
+        result = {k:dict(command=cmd,state=k,min=0,max=100,unit='%',scale=100)
+                  for k,cmd in [('targetPosition','manualPosition'),('targetPositionLamelle','manualLamelle')]
+                  if k in device.get('states', {})}
+        if 'autoAllowed' in device.get('states', {}):
+            result['autoAllowed']=dict(command='setAutomatic',state='autoAllowed',min=0,max=1,unit='boolean',integer=True)
+        return result
     if typ == 'Ventilation':
         return {k:dict(command=v[0], state=k, min=0, max=100, unit='%', flag=v[1]) for k,v in VENT.items() if k in device.get('states', {})}
     if typ == 'IRoomControllerV2':
@@ -60,6 +67,8 @@ def color_parts(value):
     return match[1], [float(x) for x in match.groups()[1:] if x is not None]
 
 def parameter_value(parameter, value):
+    if parameter in ('targetPosition','targetPositionLamelle'):
+        return float(value)*100
     if parameter != 'brightness':
         return value
     kind, values = color_parts(value)
@@ -67,6 +76,8 @@ def parameter_value(parameter, value):
 
 def wire_command(spec, value, raw=None):
     command = spec['command']
+    if command == 'setAutomatic':
+        return ('auto' if value else 'NoAuto'), None
     if command == 'setActive':
         return ('on' if value else 'off'), None
     if command == 'setPosition':
