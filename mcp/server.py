@@ -20,16 +20,7 @@ def create_app(config, backend=None):
     oauth=OAuth(config['oauth'],config['auth_db'])
     from urllib.parse import urlsplit
     host=urlsplit(config['oauth']['public_url']).netloc
-    @asynccontextmanager
-    async def lifespan(server):
-        try:
-            yield {}
-        finally:
-            close = getattr(service.backend, 'close', None)
-            if close:
-                await close()
-
-    mcp=FastMCP('Loxone controlled access',stateless_http=True,json_response=True,lifespan=lifespan,
+    mcp=FastMCP('Loxone controlled access',stateless_http=True,json_response=True,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,
             allowed_hosts=[host,'127.0.0.1:*','localhost:*'],allowed_origins=[config['oauth']['public_url']]))
 
@@ -171,7 +162,19 @@ def create_app(config, backend=None):
                             ('/.well-known/oauth-authorization-server',['GET'],oauth.metadata),
                             ('/authorize',['GET','POST'],oauth.authorize),('/token',['POST'],oauth.token)]:
         mcp.custom_route(path,methods=methods)(fn)
-    app=Guard(mcp.streamable_http_app(),oauth)
+    raw_app=mcp.streamable_http_app()
+    original_lifespan=raw_app.router.lifespan_context
+    @asynccontextmanager
+    async def app_lifespan(app):
+        async with original_lifespan(app):
+            try:
+                yield
+            finally:
+                close=getattr(service.backend,'close',None)
+                if close:
+                    await close()
+    raw_app.router.lifespan_context=app_lifespan
+    app=Guard(raw_app,oauth)
     app.service=service
     return app
 

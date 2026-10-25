@@ -118,3 +118,14 @@ def test_tunnel_write_scope_does_not_bypass_policy(app):
         r=rpc(c,'tools/call',{'name':'loxone_set_parameter','arguments':{'uuid':U,'parameter':'presenceMin','value':15,'expected_value':11,'request_id':'tunnel-policy-denied-01'}},'private-token')
         assert 'write_not_allowlisted' in r.text
         assert not app.service.backend.calls
+
+def test_backend_shutdown_only_at_application_exit(app):
+    calls=[]
+    async def close():calls.append('closed')
+    app.service.backend.close=close
+    with TestClient(app,base_url='https://mcp.test') as c:
+        token=app.oauth.put('access',{'sub':'owner','scopes':['loxone:read'],'resource':app.oauth.resource},60)
+        for _ in range(3):
+            assert rpc(c,'tools/list',token=token).status_code==200
+            assert not calls
+    assert calls==['closed']
