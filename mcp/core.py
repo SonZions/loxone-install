@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import httpx
 from controls import controls, mappings, logic_connected, parameter_value, wire_command
-from loxwebsocket import LoxWs
+from connection import SharedConnection, ConnectionFault
 
 logging.getLogger('loxwebsocket').disabled = True
 for name in ('loxwebsocket.lox_ws_api', 'loxwebsocket.encryption', 'loxwebsocket.lxtoken'):
@@ -30,6 +30,10 @@ class Miniserver:
     def __init__(self, config):
         self.config = config
         self.lock = asyncio.Lock()
+        self.connection = SharedConnection(config)
+
+    async def close(self):
+        await self.connection.close()
 
     async def structure(self):
         c = self.config
@@ -45,30 +49,10 @@ class Miniserver:
         return d
 
     async def snapshot(self, state_ids):
-        # A new authenticated subscription delivers an initial snapshot. This avoids
-        # returning a stale cached event as a fresh verification after a write.
-        async with self.lock:
-            ws = LoxWs(version=17.0)
-            values = {}
-            ready = asyncio.Event()
-            wanted = set(state_ids)
-            async def receive(data, kind):
-                if kind in (2, 3):
-                    for k, v in data.items():
-                        key = k.decode() if isinstance(k, bytes) else str(k)
-                        if key in wanted:
-                            values[key] = {'value': v.decode() if isinstance(v, bytes) else v, 'timestamp': now()}
-                    if wanted.issubset(values):
-                        ready.set()
-            ws.add_message_callback(receive, message_types=[2, 3])
-            try:
-                async with asyncio.timeout(20):
-                    await ws.connect(user=self.config['username'], password=self.config['password'],
-                                     loxone_url=self.config['url'], receive_updates=True, max_reconnect_attempts=1)
-                    await ready.wait()
-                return values
-            finally:
-                await ws.stop()
+        try:
+            return await self.connection.snapshot(state_ids)
+        except ConnectionFault as exc:
+            raise Fault(str(exc)) from None
 
     async def write(self, uuid, command, value):
         # Only the fixed command mapping in Service.write can reach this method.
@@ -79,6 +63,8 @@ class Miniserver:
             r.raise_for_status()
             if str(r.json().get('LL', {}).get('Code')) != '200':
                 raise Fault('miniserver_rejected_command')
+        # Verification must acquire a new initial snapshot after a write.
+        await self.connection.invalidate()
 
 class Service:
     def __init__(self, backend, db, policy_path):

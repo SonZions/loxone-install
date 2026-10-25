@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 import asyncio
 import json
 import logging
@@ -19,7 +20,16 @@ def create_app(config, backend=None):
     oauth=OAuth(config['oauth'],config['auth_db'])
     from urllib.parse import urlsplit
     host=urlsplit(config['oauth']['public_url']).netloc
-    mcp=FastMCP('Loxone controlled access',stateless_http=True,json_response=True,
+    @asynccontextmanager
+    async def lifespan(server):
+        try:
+            yield {}
+        finally:
+            close = getattr(service.backend, 'close', None)
+            if close:
+                await close()
+
+    mcp=FastMCP('Loxone controlled access',stateless_http=True,json_response=True,lifespan=lifespan,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=True,
             allowed_hosts=[host,'127.0.0.1:*','localhost:*'],allowed_origins=[config['oauth']['public_url']]))
 
@@ -118,6 +128,8 @@ def create_app(config, backend=None):
         """Independently read a fresh parameter state and compare against the expected value."""
         identity(ctx)
         async def action():
+            if hasattr(service.backend, 'connection'):
+                await service.backend.connection.invalidate()
             r=await service.states(uuid,parameter)
             r['verified']=r['states'][parameter]['value']==expected_value
             r['expected_value']=expected_value
@@ -152,7 +164,8 @@ def create_app(config, backend=None):
 
     @mcp.custom_route('/healthz',methods=['GET'])
     async def health(request):
-        return JSONResponse({'status':'ok','writes_enabled':bool(service.policy().get('writes_enabled'))})
+        return JSONResponse({'status':'ok','writes_enabled':bool(service.policy().get('writes_enabled')),
+            'upstream': service.backend.connection.status() if hasattr(service.backend,'connection') else {}})
     for path,methods,fn in [('/.well-known/oauth-protected-resource',['GET'],oauth.resource_metadata),
                             ('/.well-known/oauth-protected-resource/mcp',['GET'],oauth.resource_metadata),
                             ('/.well-known/oauth-authorization-server',['GET'],oauth.metadata),

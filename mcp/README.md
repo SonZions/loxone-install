@@ -267,3 +267,17 @@ Miniserver's group membership, not a guess based on names.
 Official mapping: Structure File v17 pages 43–44 and 87–90. Group tooling increases
 MCP discovery from 10 to 12 tools. Refresh the ChatGPT plugin's discovered tools
 if an existing chat does not yet see loxone_get_group_state/loxone_execute_group.
+
+### Connection ownership (incident fix, 2026-10-25)
+
+Reads share one owned WebSocket per Miniserver, storing the initial event table
+and subsequent updates. A keepalive ACK confirms the stream before each returned
+read. Event timestamps remain unchanged; connection_checked_at is separate.
+After writes and for explicit verification, the owner closes the old connection
+before acquiring a fresh initial snapshot. At most one subscription is active.
+The dependency's automatic reconnect is disabled. Failures close owned tasks and
+apply request-driven exponential cooldown (5–300 seconds plus jitter; minimum
+300 seconds for event-slot/auth blocking). Background keepalive uses that same
+socket every 60 seconds with a 15-second ACK deadline. Shutdown closes all tasks.
+`/healthz` includes sanitized upstream status, connection count and cooldown;
+this is diagnostic telemetry, not an external alert service.
