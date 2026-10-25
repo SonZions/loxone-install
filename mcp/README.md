@@ -101,19 +101,12 @@ Official references:
 - https://developers.openai.com/api/docs/guides/custom-mcp-server
 - https://developers.openai.com/plugins/build/auth
 
-## Secure MCP Tunnel alternative
+## Secure MCP Tunnel (selected deployment path)
 
-OpenAI also documents an outbound-only private transport:
-https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
-
-Create/manage a tunnel at https://platform.openai.com/settings/organization/tunnels
-and associate the intended ChatGPT workspace. This requires the account's tunnel
-permissions and a runtime key entered through a secure local configuration step.
-The existing server is HTTP-compatible, but **no tunnel is provisioned here**.
-OAuth's browser-facing authorization server must also be reachable; the tunnel
-does not automatically expose it. Do not simply disable authentication or add a
-permanent unscoped token to a public endpoint to get a tunnel working. Select the
-final authorization design before enabling this alternative.
+See [TUNNEL.md](TUNNEL.md) for the prepared private sidecar, trust model, secure
+runtime-key entry and ChatGPT setup. This path uses OpenAI tunnel ACLs plus a
+separate loopback-only read credential instead of the public OAuth login above.
+It requires a real account-owned tunnel ID and runtime key before activation.
 
 ## Dedicated Loxone user and secrets
 

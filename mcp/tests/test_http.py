@@ -89,3 +89,24 @@ def test_limits_and_origin(app):
         assert c.post('/mcp',headers={'Origin':'https://evil.test','Authorization':'Bearer '+token},json={}).status_code==403
         for _ in range(125): r=c.get('/healthz')
         assert r.status_code==429
+
+def test_private_tunnel_credential(app):
+    import time
+    app.oauth.config['tunnel']={'enabled':True,'token_hash':digest('private-token'),'expires_at':time.time()+60}
+    with TestClient(app,base_url='https://mcp.test',client=('127.0.0.1',10000)) as c:
+        assert rpc(c,'tools/list',token='private-token').status_code==200
+        r=rpc(c,'tools/call',{'name':'loxone_set_parameter','arguments':{'uuid':U,'parameter':'presenceMin','value':15,'expected_value':11,'request_id':'tunnel-denied-0001'}},'private-token')
+        assert r.json()['result']['isError']
+        assert not app.service.backend.calls
+        app.oauth.config['tunnel']['expires_at']=0
+        assert rpc(c,'tools/list',token='private-token').status_code==401
+
+def test_tunnel_rejects_nonlocal_peer(app):
+    import time
+    app.oauth.config['tunnel']={'enabled':True,'token_hash':digest('private-token'),'expires_at':time.time()+60}
+    with TestClient(app,base_url='https://mcp.test',client=('192.0.2.1',10000)) as c:
+        assert rpc(c,'tools/list',token='private-token').status_code==401
+
+def test_tunnel_disabled_by_default(app):
+    with TestClient(app,base_url='https://mcp.test',client=('127.0.0.1',10000)) as c:
+        assert rpc(c,'tools/list',token='private-token').status_code==401

@@ -165,6 +165,15 @@ class Guard:
         if path.startswith('/mcp'):
             token=headers.get(b'authorization',b'').decode()
             identity=self.oauth.get(token[7:],'access') if token.startswith('Bearer ') else None
+            # Private tunnel hop only: OpenAI tunnel ACL authenticates callers;
+            # the sidecar presents a separate, scoped, expiring local credential.
+            tunnel=self.oauth.config.get('tunnel',{})
+            peer=(scope.get('client') or ('',0))[0]
+            if (not identity and tunnel.get('enabled') and peer in ('127.0.0.1','::1') and
+                token.startswith('Bearer ') and tunnel.get('expires_at',0)>time.time() and
+                hmac.compare_digest(digest(token[7:]),tunnel.get('token_hash',''))):
+                identity={'sub':'openai-private-tunnel','scopes':['loxone:read'],
+                          'resource':self.oauth.resource}
             if not identity or identity.get('resource')!=self.oauth.resource:
                 return await JSONResponse({'error':'unauthorized'},401,headers={
                     'WWW-Authenticate':f'Bearer resource_metadata="{self.oauth.issuer}/.well-known/oauth-protected-resource"'})(scope,bounded_receive,send)

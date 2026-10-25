@@ -1,0 +1,24 @@
+services:
+  tunnel:
+    profiles: [tunnel]
+    image: ghcr.io/openai/tunnel-client:v0.0.18@sha256:486321616c197fed2d3fbe7d44f22433ce9a1e6c1ee434c0d6652868a5fda5c1
+    entrypoint: ["/usr/bin/tunnel-client"]
+    command: ["run", "--config", "/run/tunnel/config.json"]
+    user: "10002:10002"
+    network_mode: "service:mcp"
+    depends_on:
+      mcp:
+        condition: service_healthy
+    volumes:
+      - /etc/loxone-mcp/tunnel:/run/tunnel:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:size=32m,noexec,nosuid"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 192m
+    cpus: 0.5
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "3"}
