@@ -1,0 +1,216 @@
+# Controlled Loxone MCP
+
+Docker service using the official Python MCP SDK (Streamable HTTP, `/mcp`) and
+`loxwebsocket==0.6.0`. All ten requested tools are implemented. Production writes
+are **disabled by default**. Configuration remains outside Git.
+
+## Scope and limitations
+
+- Rooms and controls come from the authenticated live `LoxAPP3.json`.
+- State reads use a fresh authenticated WebSocket initial snapshot, with state UUID
+  and timestamp; they do not substitute a historical database value.
+- Supported writable runtime parameters: Ventilation `presenceMin`, `presenceMax`,
+  `absenceMin`, `absenceMax` (0–100 percent). This includes Leaf Tree controls.
+- Each write requires an exact device/parameter allowlist entry, write OAuth scope,
+  expected current value, and unique request ID. Min/max consistency, logic-bound
+  parameters, restricted controls and the control lock are checked.
+- Only mapped `setPresenceMin`, `setPresenceMax`, `setAbsenceMin`, `setAbsenceMax`
+  commands exist. There is no arbitrary API path or script execution tool.
+- This is runtime structure/state analysis, **not** arbitrary Config programming,
+  project upload, firmware updates, or an API exposing every hardware parameter.
+  Full automation logic requires a separate authorized project-export integration.
+- A failed/uncertain verification is reported and audited. No blind rollback is
+  performed: concurrent automation may have changed the value. Read fresh state
+  and authorize a conditional restoration when it is demonstrably safe.
+
+## Deployment
+
+The existing VPS uses the Docker default bridge for WireGuard forwarding. Compose
+therefore uses `network_mode: bridge`, not a newly created network requiring broad
+firewall changes. Backend publication is loopback-only at `127.0.0.1:18089`.
+
+Files:
+
+- `/opt/loxone-mcp`: source and Compose
+- `/etc/loxone-mcp/config.json`: Loxone secrets and hashed OAuth credentials
+- `/etc/loxone-mcp/policy.json`: runtime write policy
+- `/etc/loxone-mcp/owner-credentials.json`: initial OAuth credentials, root-only
+- `/var/lib/loxone-mcp/audit.sqlite`: durable audit (WAL, synchronous FULL)
+- `/var/lib/loxone-mcp/auth.sqlite`: hashed opaque tokens and short-lived grants
+
+Initial setup on VPS (the bootstrap reads credentials already in the local
+`awstates-vps` container, never from MotherDuck):
+
+```sh
+python3 bootstrap_vps.py --expected-serial YOUR_SERIAL
+ docker compose up -d --build
+ docker compose ps
+```
+
+The service runs as UID 10001 with a read-only root filesystem, no capabilities,
+resource limits, capped logs, healthcheck and `restart: unless-stopped`. Docker
+must be enabled at boot. Do not reboot the productive VPS just to test this.
+
+A bootstrap deployment has a deliberately unusable public hostname and no callback
+allowlist. It is **not externally connected** until the following steps complete.
+
+## Public HTTPS and ChatGPT OAuth
+
+Choose an owned DNS hostname. Point it at the VPS and arrange narrowly scoped
+HTTPS ingress. No provider or host firewall is opened by this deployment.
+`config/Caddyfile.example` is a host-proxy template with automatic ACME TLS; replace
+its hostname and validate it before enabling. Forward the whole host, including
+`/.well-known/*`, `/authorize` and `/token`, not just `/mcp`. Persist the proxy's
+certificate storage. Do not proxy the Miniserver directly.
+
+Configure only nonsecret endpoint values:
+
+```sh
+python3 /opt/loxone-mcp/configure.py \
+  --public-url https://YOUR_HOST \
+  --redirect-uri https://chatgpt.com/connector_platform_oauth_redirect
+cd /opt/loxone-mcp
+ docker compose restart mcp
+```
+
+Always use the exact callback shown by ChatGPT. The authorization server advertises
+RFC 9207 issuer identification and returns `iss`, supporting the stable callback
+above. Static OAuth registration is intentional: no unrestricted DCR endpoint.
+
+In ChatGPT on the web:
+
+1. Open **Plugins → + → Add custom MCP server** (subject to workspace permissions).
+2. Name it Loxone; set Server URL to `https://YOUR_HOST/mcp`.
+3. Select OAuth with provided/static credentials. Client ID is `loxone-chatgpt`.
+   Enter the client secret privately from the root-only initial credential file,
+   or use `configure.py --rotate-oauth` to set credentials you manage locally.
+4. Review the permissions and create/install the plugin. During authorization,
+   use the MCP login password, **not** the Loxone password.
+5. Request `loxone_get_system_info`, then a targeted `loxone_get_parameters` call.
+6. Only a real successful call from ChatGPT proves integration. An HTTP healthcheck,
+   Inspector test or VPS-side MCP call does not prove it.
+
+OAuth uses S256 PKCE, exact callback matching, resource-bound access tokens,
+read/write scopes, one-use authorization codes, CSRF protection and 15-minute
+access tokens. Rotating refresh tokens expire after 30 days; refresh-token reuse
+revokes the token family. There is no password grant. The login password is scrypt
+hashed. Tokens and client secrets are SHA-256 hashed at rest. Browser consent alone
+cannot bypass the write allowlist.
+
+Official references:
+- https://developers.openai.com/api/docs/guides/custom-mcp-server
+- https://developers.openai.com/plugins/build/auth
+
+## Secure MCP Tunnel alternative
+
+OpenAI also documents an outbound-only private transport:
+https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
+
+Create/manage a tunnel at https://platform.openai.com/settings/organization/tunnels
+and associate the intended ChatGPT workspace. This requires the account's tunnel
+permissions and a runtime key entered through a secure local configuration step.
+The existing server is HTTP-compatible, but **no tunnel is provisioned here**.
+OAuth's browser-facing authorization server must also be reachable; the tunnel
+does not automatically expose it. Do not simply disable authentication or add a
+permanent unscoped token to a public endpoint to get a tunnel working. Select the
+final authorization design before enabling this alternative.
+
+## Dedicated Loxone user and secrets
+
+The bootstrap reuses an existing server-side account. Its least-privilege status
+is not established. Prefer a dedicated account created in Loxone Config with only
+needed visible rooms/controls and appropriate runtime permissions. Creating that
+account can require a configuration upload and is not performed automatically.
+
+Enter its credentials directly on the VPS, without shell arguments/history:
+
+```sh
+python3 /opt/loxone-mcp/configure.py --service-user
+python3 /opt/loxone-mcp/configure.py --rotate-oauth
+cd /opt/loxone-mcp
+ docker compose restart mcp
+```
+
+The rotation command prompts without echo and revokes existing OAuth grants.
+Initial secrets remain in the root-only owner file until rotation removes it.
+Never paste secrets into chat, commits, screenshots, logs, or reports.
+The Loxone HTTP hop is within the WireGuard route (VPS to home gateway); the LAN
+hop itself uses the existing HTTP endpoint. Use validated Miniserver HTTPS if that
+is required by the local threat model. Do not disable certificate validation.
+
+## Controlled pilot
+
+Do not enable writes without the user's explicit pilot approval. After approval,
+set the policy to the exact UUID/parameter and one request:
+
+```json
+{
+  "writes_enabled": true,
+  "allowlist": {"CONTROL_UUID": ["presenceMin"]},
+  "pilot_grant": {
+    "uuid":"CONTROL_UUID", "parameter":"presenceMin", "expected_value":11,
+    "value":15, "request_id":"unique-approved-pilot-id"
+  }
+}
+```
+
+Update the existing policy file in place, preserving UID 10001 and mode 0400; policy
+is re-read per call. Verify the starting value live, perform one call, verify from
+a fresh subscription, inspect audit, then disable writes again. Other fans are
+never allowlisted. A consumed/pending request ID cannot be replayed after restart.
+For later general use, deliberately expand the allowlist and remove the one-use
+pilot restriction only when that scope is authorized.
+
+## Tests and operations
+
+```sh
+uv venv .venv
+uv pip install --python .venv/bin/python -r requirements.txt pytest pytest-asyncio
+.venv/bin/python -m pytest -q tests
+curl --fail http://127.0.0.1:18089/healthz
+curl -i http://127.0.0.1:18089/mcp  # expected 401 without a bearer token
+ docker compose ps
+```
+
+Tests use an in-memory MockMiniserver plus HTTP MockTransport, never production
+actuators. They cover discovery, authentication, OAuth/PKCE/CSRF, wrong resource,
+refresh replay, write scopes, allowlist, input/path validation, conditional writes,
+mock verification, upstream errors, audit persistence, concurrency and limits.
+Live read checks are separate and must never be confused with mock results.
+
+`/healthz` checks process readiness only, not Miniserver connectivity. Monitor both
+Docker health and authenticated `loxone_get_system_info`/targeted state reads. Review
+`loxone_get_change_history` for `pending`, `verification_failed`, `outcome_unknown`.
+Global limits: 120 API requests/minute, 20 auth requests/minute, 16 KiB bodies.
+Read calls have a 35-second budget; upstream HTTP 12 seconds, snapshots 20 seconds.
+For slow-body protection the proxy should enforce client body timeouts as well.
+
+Update: review source/dependency changes, run tests, back up SQLite with its backup
+API (not by copying only a live WAL database), retain the previous image, then
+`docker compose up -d --build`. Verify health, 401 rejection and live reads. Pin
+new base-image digests deliberately. Audit history is retained until the operator
+archives it; do not delete request IDs while their replay protection is needed.
+Backups contain household data and OAuth grants and must remain access restricted.
+
+## Selection rationale
+
+Reviewed on implementation date:
+
+- `reijosirila/loxone-mcp-server`: Streamable HTTP, but documents Ventilation as
+  unsupported and limitations for Gen2/TLS. Does not satisfy this Leaf pilot.
+- `syntropicsignal-ai/loxone-mcp`: room/control/state tools and generic commands;
+  its documented API-key/cloud-connect approach does not provide the required
+  ChatGPT OAuth and explicit parameter-policy/audit boundary as-is.
+- `Smarteon/lox-mcp`: promising WebSocket tools; retrieval could not be completed,
+  so it was not treated as a reviewed deployable dependency.
+- Official Miniserver MCP: previous authenticated probe on the current firmware
+  returned 404; installing/upgrading a Miniserver plugin is a separate productive
+  configuration change, not assumed here.
+
+The adapter reuses the SDK and the same Loxone library already used by the Bronze
+collector. It does not execute third-party installation scripts. The existing
+`loxone-install` PowerShell installer is unrelated and is not executed or changed.
+
+Loxone command reference:
+https://www.loxone.com/wp-content/uploads/datasheets/StructureFile.pdf
+(`Ventilation`, `setPresenceMin/{value}` and related runtime commands).

@@ -1,0 +1,20 @@
+# Template only. Requires a user-owned DNS name and reachable TCP 443 (80 for HTTP ACME).
+# Run on the host; the backend is loopback-only. Do not forward to the Miniserver.
+mcp.example.com {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+    }
+    request_body {
+        max_size 16KB
+    }
+    reverse_proxy 127.0.0.1:18089 {
+        flush_interval -1
+        transport http {
+            dial_timeout 5s
+            response_header_timeout 40s
+        }
+    }
+    # Access logs deliberately disabled: OAuth authorization URLs contain codes/state.
+}

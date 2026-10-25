@@ -1,0 +1,6 @@
+FROM loxone-mcp:local
+USER root
+RUN pip install --no-cache-dir pytest==9.1.1 pytest-asyncio==1.4.0
+COPY tests /app/tests
+USER 10001:10001
+CMD ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "/app/tests"]

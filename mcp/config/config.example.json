@@ -1,0 +1,9 @@
+{
+  "loxone": {"url":"http://192.168.1.10", "username":"dedicated-service-user", "password":"LOCAL_SECRET_ONLY", "serial":"EXPECTED_SERIAL"},
+  "oauth": {
+    "public_url":"https://mcp.example.com", "client_id":"loxone-chatgpt",
+    "client_secret_hash":"SHA256_HEX", "password_salt":"RANDOM_HEX", "password_hash":"SCRYPT_HEX",
+    "redirect_uris":["https://chatgpt.com/connector_platform_oauth_redirect"]
+  },
+  "audit_db":"/data/audit.sqlite", "auth_db":"/data/auth.sqlite", "policy_path":"/run/secrets/policy.json"
+}

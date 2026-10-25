@@ -1,0 +1,7 @@
+*
+!requirements.txt
+!core.py
+!auth.py
+!server.py
+!tests/
+!tests/*.py
