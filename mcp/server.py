@@ -92,6 +92,8 @@ def create_app(config, backend=None):
     async def loxone_set_parameter(uuid:str,parameter:str,value:float,expected_value:float,request_id:str,ctx:Context)->dict:
         """Set an explicitly allowlisted runtime ventilation parameter, then verify it live.
         Requires write scope, expected current value, and unique request ID (16-100 safe characters).
+        ALWAYS ask the user to confirm this exact device, parameter, old value and target value
+        immediately before this call. General permission to write is not confirmation of a change.
         Never retry with a new ID after an unknown outcome; inspect state and audit history first.
         """
         actor=identity(ctx,True)
@@ -99,7 +101,9 @@ def create_app(config, backend=None):
 
     @mcp.tool(annotations=WRITE)
     async def loxone_execute_command(uuid:str,parameter:str,command:str,value:float,expected_value:float,request_id:str,ctx:Context)->dict:
-        """Execute only a mapped ventilation command, with explicit device and parameter. No API paths."""
+        """Execute only a mapped ventilation command, with explicit device and parameter. No API paths.
+        ALWAYS ask the user to confirm this exact device, parameter, old value and target value
+        immediately before calling. General permission to write is not confirmation of a change."""
         actor=identity(ctx,True)
         from core import PARAMETERS
         if parameter not in PARAMETERS or command!=PARAMETERS[parameter][0]:

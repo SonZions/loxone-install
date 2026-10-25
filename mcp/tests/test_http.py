@@ -110,3 +110,11 @@ def test_tunnel_rejects_nonlocal_peer(app):
 def test_tunnel_disabled_by_default(app):
     with TestClient(app,base_url='https://mcp.test',client=('127.0.0.1',10000)) as c:
         assert rpc(c,'tools/list',token='private-token').status_code==401
+
+def test_tunnel_write_scope_does_not_bypass_policy(app):
+    import time
+    app.oauth.config['tunnel']={'enabled':True,'allow_writes':True,'token_hash':digest('private-token'),'expires_at':time.time()+60}
+    with TestClient(app,base_url='https://mcp.test',client=('127.0.0.1',10000)) as c:
+        r=rpc(c,'tools/call',{'name':'loxone_set_parameter','arguments':{'uuid':U,'parameter':'presenceMin','value':15,'expected_value':11,'request_id':'tunnel-policy-denied-01'}},'private-token')
+        assert 'write_not_allowlisted' in r.text
+        assert not app.service.backend.calls

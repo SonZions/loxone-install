@@ -1,5 +1,5 @@
 """Run interactively on VPS. No key in command arguments, logs, or chat."""
-import getpass,hashlib,json,os,re,secrets,time
+import argparse,getpass,hashlib,json,os,re,secrets,time
 from pathlib import Path
 
 def write_private(path,content,uid):
@@ -10,7 +10,11 @@ def write_private(path,content,uid):
 if __name__=='__main__':
     if os.geteuid()!=0:raise SystemExit('Run on the VPS as root.')
     print('Configure only a tunnel whose OpenAI workspace/organization access you have reviewed.')
-    tid=input('Exact tunnel ID from OpenAI: ').strip()
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--tunnel-id')
+    parser.add_argument('--allow-writes',action='store_true',help='Enable write scope only; device allowlist and ChatGPT confirmation remain required')
+    args=parser.parse_args()
+    tid=(args.tunnel_id or input('Exact tunnel ID from OpenAI: ')).strip()
     if not re.fullmatch(r'tunnel_[A-Za-z0-9_-]{8,150}',tid):raise SystemExit('Invalid tunnel ID')
     key=getpass.getpass('Tunnel runtime API key (not admin key; input hidden): ').strip()
     if not key or any(ch.isspace() for ch in key):raise SystemExit('Invalid runtime key')
@@ -26,7 +30,7 @@ if __name__=='__main__':
         'extra_headers':{'Authorization':'file:/run/tunnel/backend-authorization'},'max_concurrent_requests':2}}
     write_private(root/'config.json',json.dumps(cfg,indent=2)+'\n',10002)
     path=Path('/etc/loxone-mcp/config.json');c=json.loads(path.read_text())
-    c['oauth']['tunnel']={'enabled':True,'token_hash':hashlib.sha256(local.encode()).hexdigest(),'expires_at':time.time()+30*86400}
+    c['oauth']['tunnel']={'enabled':True,'allow_writes':args.allow_writes,'token_hash':hashlib.sha256(local.encode()).hexdigest(),'expires_at':time.time()+30*86400}
     write_private(path,json.dumps(c),10001)
-    print('Saved. Local tunnel credential is READ-ONLY and expires in 30 days. No secret printed.')
+    print('Saved. Tunnel scope: '+('read/write' if args.allow_writes else 'read-only')+'. Local credential expires in 30 days. No secret printed.')
     print('Restart MCP, then run the tunnel doctor before starting the tunnel service.')

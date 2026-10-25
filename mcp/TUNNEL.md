@@ -93,3 +93,23 @@ Neither the local MCP smoke test nor `/readyz=200` alone proves ChatGPT integrat
 Official guide: https://developers.openai.com/api/docs/guides/secure-mcp-tunnels
 Client: https://github.com/openai/tunnel-client
 Release source inspected; no third-party install script executed.
+
+## Optional writes: always confirm each concrete change
+
+The owner subsequently authorized write capability, conditional on a fresh user
+confirmation for every concrete change. `configure_tunnel.py --allow-writes`
+now enables the tunnel's write scope, but does not change the device allowlist.
+Without this flag the transport stays read-only.
+
+Both write tools are marked `readOnlyHint=false`, `destructiveHint=true` and
+explicitly instruct the assistant to ask before each exact device/parameter/value
+change. ChatGPT asks for confirmation by default for write tools. **Never select
+"remember approval" / auto-approve** for these tools. Verify the actual ChatGPT
+confirmation behavior before opening the production allowlist.
+
+This is a client-side human confirmation: the MCP server cannot independently
+prove that a human approved a received tool call. Its own checks enforce scopes,
+allowlist, expected values, replay prevention and audit. General write capability
+is not permission for the assistant to perform any specific change.
+
+Source: https://developers.openai.com/api/docs/guides/custom-mcp-server

@@ -172,7 +172,7 @@ class Guard:
             if (not identity and tunnel.get('enabled') and peer in ('127.0.0.1','::1') and
                 token.startswith('Bearer ') and tunnel.get('expires_at',0)>time.time() and
                 hmac.compare_digest(digest(token[7:]),tunnel.get('token_hash',''))):
-                identity={'sub':'openai-private-tunnel','scopes':['loxone:read'],
+                identity={'sub':'openai-private-tunnel','scopes':(['loxone:read','loxone:write'] if tunnel.get('allow_writes') else ['loxone:read']),
                           'resource':self.oauth.resource}
             if not identity or identity.get('resource')!=self.oauth.resource:
                 return await JSONResponse({'error':'unauthorized'},401,headers={
